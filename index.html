@@ -106,7 +106,7 @@ var canvas = document.getElementById('canvas')
 var gl = canvas.getContext("webgl")
 var programInfo = twgl.createProgramInfo(gl, ["vertex-shader", "fragment-shader"])
 var image = twgl.createTexture(gl, {src: [0, 0, 0, 0]})
-var name = null
+var name = ''
 var settings = {
   gamma: 0,
   red: 0.2,
@@ -151,7 +151,9 @@ html.addEventListener('drop', function(e) {
     twgl.createTexture(gl, {
       src: window.URL.createObjectURL(f),
     }, function(e, t, img) {
-      if (!e) {
+      if (e) {
+        alert('This is not a valid image.')
+      } else {
         image = t
         name = f.name.replace(/\.(png|jpg|jpeg|gif)$/i, '')
         canvas.width = img.width
@@ -185,12 +187,14 @@ setting('red')
 setting('green')
 setting('blue')
 document.getElementById('save-button').addEventListener('click', function() {
-  if (name) {
+  if (name !== '') {
     // Redraw canvas and use result before buffers get swapped.
     draw()
     canvas.toBlob(function(blob) {
       saveAs(blob, name + '.png')
     }, 'image/png')
+  } else {
+    alert('There is no image to save.')
   }
 })
 </script>
