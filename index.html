@@ -1,73 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <title>Black &amp; White</title>
-  <style type="text/css">
-    html {
-      background: #333;
-    }
-    #container {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      bottom: 20px;
-      left: 20px;
-      text-align: center;
-    }
-    #canvas {
-      max-width: 100%;
-      max-height: 100%;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="ie=edge">
+<title>Black &amp; White</title>
+<style type="text/css">
+html {
+  background: #333;
+  font-family: sans-serif;
+}
+#container {
+  position: fixed;
+  top: 20px;
+  right: 220px;
+  bottom: 20px;
+  left: 20px;
+  text-align: center;
+}
+#controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 180px;
+  padding: 10px;
+  background: #eee;
+}
+#controls div {
+  margin: 0 0 1em 0;
+}
+input {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+input[type=text] {
+  width: 4em;
+}
+#canvas {
+  max-width: 100%;
+  max-height: 100%;
+}
+</style>
 </head>
 <body>
-  <div id="container">
-    <canvas id="canvas"></canvas>
+<div id="container">
+<canvas id="canvas"></canvas>
+</div>
+<div id="controls">
+  <div>
+    <strong>Brightness</strong><br/>
+    <input type="range" id="gamma-slider" value="0" min="-1" max="1" step="0.01"/><br/>
+    <input type="text" id="gamma-input" value="0"/>
   </div>
-  <script type="text/javascript">
-    var bw = function(data, offset, gamma) {
-      var r = data[offset] / 255
-      var g = data[offset + 1] / 255
-      var b = data[offset + 2] / 255
+  <div>
+    <strong>Red</strong><br/>
+    <input type="range" id="red-slider" value="0.2" min="0" max="1" step="0.01"/><br/>
+    <input type="text" id="red-input" value="0.2"/>
+  </div>
+  <div>
+    <strong>Green</strong><br/>
+    <input type="range" id="green-slider" value="0.3" min="0" max="1" step="0.01"/><br/>
+    <input type="text" id="green-input" value="0.3"/>
+  </div>
+  <div>
+    <strong>Blue</strong><br/>
+    <input type="range" id="blue-slider" value="0.5" min="0" max="1" step="0.01"/><br/>
+    <input type="text" id="blue-input" value="0.5"/>
+  </div>
+  <div>
+    <button id="save-button">Save Image ...</button>
+  </div>
+</div>
+<script type="text/javascript" src="twgl.min.js"></script>
+<script type="text/javascript" src="save-as.js"></script>
+<script type="shader/vertex" id="vertex-shader">
+attribute vec4 a_position;
+varying vec2 v_pos;
 
-      var c = Math.pow(0.299 * r + 0.587 * g + 0.114 * b, gamma)
+void main() {
+  v_pos = vec2(a_position.x, -a_position.y) * 0.5 + 0.5;
+  gl_Position = a_position;
+}
+</script>
+<script type="shader/fragment" id="fragment-shader">
+precision mediump float;
 
-      r = c * (1.0 - (1.0 - c) * 0.8)
-      g = c * (1.0 - (1.0 - c) * 0.7)
-      b = c * (1.0 - (1.0 - c) * 0.5)
+varying vec2 v_pos;
+uniform float u_gamma;
+uniform sampler2D u_image;
+uniform vec3 u_color;
+const vec4 lum = vec4(0.299, 0.587, 0.114, 0);
 
-      data[offset] = Math.round(r * 255.0)
-      data[offset + 1] = Math.round(g * 255.0)
-      data[offset + 2] = Math.round(b * 255.0)
-    }
-    var html = document.getElementsByTagName('html')[0]
-    var canvas = document.getElementById('canvas')
-    html.addEventListener('dragover', function(e) {
-      e.preventDefault()
-    })
-    html.addEventListener('drop', function(e) {
-      e.preventDefault()
-      if (e.dataTransfer.files.length > 0) {
-        var f = e.dataTransfer.files[0]
-        var img = new Image()
-        img.src = window.URL.createObjectURL(f)
-        img.onload = function() {
-          canvas.width = img.width
-          canvas.height = img.height
-          var ctx = canvas.getContext('2d')
-          ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
-          ctx.drawImage(img, 0, 0)
-          var data = ctx.getImageData(0, 0, img.width, img.height)
-          for (var i = 0; i < img.width * img.height; ++i) {
-            bw(data.data, i * 4, 0.7)
-          }
-          ctx.putImageData(data, 0, 0)
-        }
+void main() {
+  vec4 pixel = texture2D(u_image, v_pos);
+  float c = dot(lum, pixel);
+  c = pow(c, u_gamma);
+  gl_FragColor = vec4(c * (1.0 - (1.0 - c) * (1.0 - u_color)), pixel.a);
+}
+</script>
+<script type="text/javascript">
+var canvas = document.getElementById('canvas')
+var gl = canvas.getContext("webgl")
+var programInfo = twgl.createProgramInfo(gl, ["vertex-shader", "fragment-shader"])
+var image = twgl.createTexture(gl, {src: [0, 0, 0, 0]})
+var name = null
+var settings = {
+  gamma: 0,
+  red: 0.2,
+  green: 0.3,
+  blue: 0.5,
+}
+var arrays = {
+  a_position: [-1, -1, 0, 1, -1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1, 1, 0],
+}
+var bufferInfo = twgl.createBufferInfoFromArrays(gl, arrays)
+
+var draw = function() {
+  //twgl.resizeCanvasToDisplaySize(gl.canvas)
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height)
+  gl.useProgram(programInfo.program)
+  twgl.setBuffersAndAttributes(gl, programInfo, bufferInfo)
+  twgl.setUniforms(programInfo, {
+    u_gamma: 1 / Math.sqrt(2 * Math.pow(100, settings.gamma)),
+    u_color: [settings.red, settings.green, settings.blue],
+    u_image: image,
+  })
+  twgl.drawBufferInfo(gl, bufferInfo)
+}
+
+var needs_update = false
+var render = function(time) {
+  if (needs_update) {
+    draw()
+    needs_update = false
+  }
+  requestAnimationFrame(render)
+}
+requestAnimationFrame(render)
+var html = document.getElementsByTagName('html')[0]
+html.addEventListener('dragover', function(e) {
+  e.preventDefault()
+})
+html.addEventListener('drop', function(e) {
+  e.preventDefault()
+  if (e.dataTransfer.files.length > 0) {
+    var f = e.dataTransfer.files[0]
+    twgl.createTexture(gl, {
+      src: window.URL.createObjectURL(f),
+    }, function(e, t, img) {
+      if (!e) {
+        image = t
+        name = f.name.replace(/\.(png|jpg|jpeg|gif)$/i, '')
+        canvas.width = img.width
+        canvas.height = img.height
+        needs_update = true
       }
     })
-  </script>
+  }
+})
+var setting = function(name) {
+  var slider = document.getElementById(name + '-slider')
+  var input = document.getElementById(name + '-input')
+  var update_setting = function() {
+    var v = slider.value
+    settings[name] = v
+    input.value = v
+    needs_update = true
+  }
+  slider.addEventListener('change', update_setting)
+  slider.addEventListener('input', update_setting)
+  update_setting()
+  input.addEventListener('change', function() {
+    var v = input.value
+    settings[name] = v
+    slider.value = v
+    needs_update = true
+  })
+}
+setting('gamma')
+setting('red')
+setting('green')
+setting('blue')
+document.getElementById('save-button').addEventListener('click', function() {
+  if (name) {
+    // Redraw canvas and use result before buffers get swapped.
+    draw()
+    canvas.toBlob(function(blob) {
+      saveAs(blob, name + '.png')
+    }, 'image/png')
+  }
+})
+</script>
 </body>
 </html>
