@@ -51,24 +51,14 @@ input[type=text] {
 </div>
 <div id="controls">
   <div>
-    <strong>Brightness</strong><br/>
-    <input type="range" id="gamma-slider" value="0" min="-1" max="1" step="0.01"/><br/>
-    <input type="text" id="gamma-input" value="0"/>
+    <strong>Hue</strong><br/>
+    <input type="range" id="hue-slider" value="0.65" min="0" max="1" step="0.001"/><br/>
+    <input type="text" id="hue-input" value="0.65"/>
   </div>
   <div>
-    <strong>Red</strong><br/>
-    <input type="range" id="red-slider" value="0.2" min="0" max="1" step="0.01"/><br/>
-    <input type="text" id="red-input" value="0.2"/>
-  </div>
-  <div>
-    <strong>Green</strong><br/>
-    <input type="range" id="green-slider" value="0.3" min="0" max="1" step="0.01"/><br/>
-    <input type="text" id="green-input" value="0.3"/>
-  </div>
-  <div>
-    <strong>Blue</strong><br/>
-    <input type="range" id="blue-slider" value="0.5" min="0" max="1" step="0.01"/><br/>
-    <input type="text" id="blue-input" value="0.5"/>
+    <strong>Saturation</strong><br/>
+    <input type="range" id="sat-slider" value="0.2" min="0" max="1" step="0.001"/><br/>
+    <input type="text" id="sat-input" value="0.2"/>
   </div>
   <div>
     <button id="save-button">Save Image ...</button>
@@ -89,16 +79,231 @@ void main() {
 precision mediump float;
 
 varying vec2 v_pos;
-uniform float u_gamma;
+uniform float u_hue;
+uniform float u_sat;
 uniform sampler2D u_image;
-uniform vec3 u_color;
-const vec4 lum = vec4(0.299, 0.587, 0.114, 0);
+
+float f(float x) {
+  if (x >= 0.0031308) {
+    return 1.055 * pow(x, 1.0/2.4) - 0.055;
+  } else {
+    return 12.92 * x;
+  }
+}
+float f_inv(float x) {
+  if (x >= 0.04045) {
+    return pow((x + 0.055) / (1.0 + 0.055), 2.4);
+  } else {
+    return x / 12.92;
+  }
+}
+vec3 to_linear(vec3 rgb) {
+  return vec3(f(rgb.r), f(rgb.g), f(rgb.b));
+}
+vec3 from_linear(vec3 lrgb) {
+  return vec3(f_inv(lrgb.r), f_inv(lrgb.g), f_inv(lrgb.b));
+}
+vec3 linear_srgb_to_oklab(vec3 rgb) {
+  vec3 lms = mat3(
+    0.4122214708, 0.2119034982, 0.0883024619,
+    0.5363325363, 0.6806995451, 0.2817188376,
+    0.0514459929, 0.1073969566, 0.6299787005
+  ) * rgb;
+  lms = pow(lms, vec3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
+  return mat3(
+    +0.2104542553, +1.9779984951, +0.0259040371,
+    +0.7936177850, -2.4285922050, +0.7827717662,
+    -0.0040720468, +0.4505937099, -0.8086757660
+  ) * lms;
+}
+vec3 srgb_to_oklab(vec3 rgb) {
+  return linear_srgb_to_oklab(to_linear(rgb));
+}
+vec3 oklab_to_linear_srgb(vec3 lab) {
+  vec3 lms = mat3(
+    1.0, 1.0, 1.0,
+    0.3963377774, -0.1055613458, -0.0894841775,
+    0.2158037573, -0.0638541728, -1.2914855480
+  ) * lab;
+  lms = pow(lms, vec3(3.0, 3.0, 3.0));
+  return mat3(
+    4.0767416621, -1.2684380046, -0.0041960863,
+    -3.3077115913, 2.6097574011, -0.7034186147,
+    0.2309699292, -0.3413193965, 1.7076147010
+  ) * lms;
+}
+vec3 oklab_to_srgb(vec3 lab) {
+  return from_linear(oklab_to_linear_srgb(lab));
+}
+float toe(float x) {
+  float k_1 = 0.206;
+  float k_2 = 0.03;
+  float k_3 = (1.0 + k_1) / (1.0 + k_2);
+  return 0.5 * (k_3 * x - k_1 + sqrt((k_3 * x - k_1) * (k_3 * x - k_1) + 4.0 * k_2 * k_3 * x));
+}
+float toe_inv(float x) {
+  float k_1 = 0.206;
+  float k_2 = 0.03;
+  float k_3 = (1.0 + k_1) / (1.0 + k_2);
+  return (x * x + k_1 * x) / (k_3 * (x + k_2));
+}
+vec2 to_st(vec2 cusp) {
+  return vec2(cusp.x / cusp.y, cusp.x / (1.0 - cusp.y));
+}
+vec2 get_st_mid(float a, float b) {
+  float s = 0.11516993 + 1.0 / (
+    +7.44778970 + 4.15901240 * b
+    + a * (-2.19557347 + 1.75198401 * b
+      + a * (-2.13704948 - 10.02301043 * b
+        + a * (-4.24894561 + 5.38770819 * b + 4.69891013 * a
+          )))
+    );
+  float t = 0.11239642 + 1.0 / (
+    +1.61320320 - 0.68124379 * b
+    + a * (+0.40370612 + 0.90148123 * b
+      + a * (-0.27087943 + 0.61223990 * b
+        + a * (+0.00299215 - 0.45399568 * b - 0.14661872 * a
+          )))
+    );
+  return vec2(s, t);
+}
+float compute_max_saturation(float a, float b) {
+  /* Max saturation will be when one of r, g or b goes below zero. */
+  /* Select different coefficients depending on which component goes below zero first */
+  float k0, k1, k2, k3, k4, wl, wm, ws;
+  if (-1.88170328 * a - 0.80936493 * b > 1.0) {
+    /* Red component */
+    k0 = +1.19086277; k1 = +1.76576728; k2 = +0.59662641; k3 = +0.75515197; k4 = +0.56771245;
+    wl = +4.0767416621; wm = -3.3077115913; ws = +0.2309699292;
+  } else if (1.81444104 * a - 1.19445276 * b > 1.0) {
+    /* Green component */
+    k0 = +0.73956515; k1 = -0.45954404; k2 = +0.08285427; k3 = +0.12541070; k4 = +0.14503204;
+    wl = -1.2684380046; wm = +2.6097574011; ws = -0.3413193965;
+  } else {
+    /* Blue component */
+    k0 = +1.35733652; k1 = -0.00915799; k2 = -1.15130210; k3 = -0.50559606; k4 = +0.00692167;
+    wl = -0.0041960863; wm = -0.7034186147; ws = +1.7076147010;
+  }
+  /* Approximate max saturation using a polynomial: */
+  float S = k0 + k1 * a + k2 * b + k3 * a * a + k4 * a * b;
+  /* Do one step Halley's method to get closer */
+  /* this gives an error less than 10e6, except for some blue hues where the dS/dh is close to infinite */
+  /* this should be sufficient for most applications, otherwise do two/three steps */
+  float k_l = +0.3963377774 * a + 0.2158037573 * b;
+  float k_m = -0.1055613458 * a - 0.0638541728 * b;
+  float k_s = -0.0894841775 * a - 1.2914855480 * b;
+  {
+      float l_ = 1.0 + S * k_l;
+      float m_ = 1.0 + S * k_m;
+      float s_ = 1.0 + S * k_s;
+
+      float l = l_ * l_ * l_;
+      float m = m_ * m_ * m_;
+      float s = s_ * s_ * s_;
+
+      float l_dS = 3.0 * k_l * l_ * l_;
+      float m_dS = 3.0 * k_m * m_ * m_;
+      float s_dS = 3.0 * k_s * s_ * s_;
+
+      float l_dS2 = 6.0 * k_l * k_l * l_;
+      float m_dS2 = 6.0 * k_m * k_m * m_;
+      float s_dS2 = 6.0 * k_s * k_s * s_;
+
+      float f  = wl * l     + wm * m     + ws * s;
+      float f1 = wl * l_dS  + wm * m_dS  + ws * s_dS;
+      float f2 = wl * l_dS2 + wm * m_dS2 + ws * s_dS2;
+
+      S = S - f * f1 / (f1 * f1 - 0.5 * f * f2);
+  }
+  return S;
+}
+vec2 find_cusp(float a, float b) {
+  /* First, find the maximum saturation (saturation S = C/L) */
+  float S_cusp = compute_max_saturation(a, b);
+  /* Convert to linear sRGB to find the first point where at least one of r,g or b >= 1: */
+  vec3 rgb_at_max = oklab_to_linear_srgb(vec3(1.0, S_cusp * a, S_cusp * b));
+  float L_cusp = pow(1.0 / max(max(rgb_at_max.r, rgb_at_max.g), rgb_at_max.b), 1.0 / 3.0);
+  float C_cusp = L_cusp * S_cusp;
+  return vec2(L_cusp, C_cusp);
+}
+float find_gamut_intersection(float a, float b, float L1, float C1, float L0, vec2 cusp) {
+  /* Find the intersection for upper and lower half separately */
+  float t;
+  if (((L1 - L0) * cusp.y - (cusp.x - L0) * C1) <= 0.0) {
+    /* Lower half */
+    t = cusp.y * L0 / (C1 * cusp.x + cusp.y * (L0 - L1));
+  } else {
+    /* Upper half */
+
+    /* First intersect with triangle */
+    t = cusp.y * (L0 - 1.0) / (C1 * (cusp.x - 1.0) + cusp.y * (L0 - L1));
+
+    /* Then one step Halley's method */
+    float dL = L1 - L0;
+    float dC = C1;
+
+    float k_l = +0.3963377774 * a + 0.2158037573 * b;
+    float k_m = -0.1055613458 * a - 0.0638541728 * b;
+    float k_s = -0.0894841775 * a - 1.2914855480 * b;
+
+    float l_dt = dL + dC * k_l;
+    float m_dt = dL + dC * k_m;
+    float s_dt = dL + dC * k_s;
+  }
+  return t;
+}
+vec3 get_cs(float l, float a, float b) {
+  vec2 cusp = find_cusp(a, b);
+  float c_max = find_gamut_intersection(a, b, l, 1.0, l, cusp);
+  vec2 st_max = to_st(cusp);
+  float k = c_max / min((l * st_max.x), (1.0 - l) * st_max.y);
+  vec2 st_mid = get_st_mid(a, b);
+  float c_a = l * st_mid.x;
+  float c_b = (1.0 - l) * st_mid.y;
+  float c_mid = 0.9 * k * sqrt(sqrt(1.0 / (1.0 / (c_a * c_a * c_a * c_a) + 1.0 / (c_b * c_b * c_b * c_b))));
+  c_a = l * 0.4;
+  c_b = (1.0 - l) * 0.8;
+  float c_0 = sqrt(1.0 / (1.0 / (c_a * c_a) + 1.0 / (c_b * c_b)));
+  return vec3(c_0, c_mid, c_max);
+}
+vec3 okhsl_to_srgb(vec3 hsl) {
+  float h = hsl.x;
+  float s = hsl.y;
+  float l = hsl.z;
+  if (l == 1.0) {
+    return vec3(1.0, 1.0, 1.0);
+  } else if (l == 0.0) {
+    return vec3(0.0, 0.0, 0.0);
+  }
+  float a = cos(6.2831853072 * h);
+  float b = sin(6.2831853072 * h);
+  l = toe_inv(l);
+  vec3 cs = get_cs(l, a, b);
+  float c_0 = cs.x;
+  float c_mid = cs.y;
+  float c_max = cs.z;
+  float mid = 0.8;
+  float mid_inv = 1.25;
+  float c, t, k_0, k_1, k_2;
+  if (s < mid) {
+    t = mid_inv * s;
+    k_1 = mid * c_0;
+    k_2 = (1.0 - k_1 / c_mid);
+    c = t * k_1 / (1.0 - k_2 * t);
+  } else {
+    t = (s - mid)/ (1.0 - mid);
+    k_0 = c_mid;
+    k_1 = (1.0 - mid) * c_mid * c_mid * mid_inv * mid_inv / c_0;
+    k_2 = (1.0 - (k_1) / (c_max - c_mid));
+    c = k_0 + t * k_1 / (1.0 - k_2 * t);
+  }
+  return oklab_to_srgb(vec3(l, c * a, c * b));
+}
 
 void main() {
   vec4 pixel = texture2D(u_image, v_pos);
-  float c = dot(lum, pixel);
-  c = pow(c, u_gamma);
-  gl_FragColor = vec4(c * (1.0 - (1.0 - c) * (1.0 - u_color)), pixel.a);
+  vec3 oklab = srgb_to_oklab(pixel.rgb);
+  gl_FragColor = vec4(okhsl_to_srgb(vec3(u_hue, u_sat, oklab.x)), pixel.a);
 }
 </script>
 <script type="text/javascript">
@@ -108,10 +313,8 @@ var programInfo = twgl.createProgramInfo(gl, ["vertex-shader", "fragment-shader"
 var image = twgl.createTexture(gl, {src: [0, 0, 0, 0]})
 var name = ''
 var settings = {
-  gamma: 0,
-  red: 0.2,
-  green: 0.3,
-  blue: 0.5,
+  hue: 0.65,
+  sat: 0.2,
 }
 var arrays = {
   a_position: [-1, -1, 0, 1, -1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1, 1, 0],
@@ -124,8 +327,8 @@ var draw = function() {
   gl.useProgram(programInfo.program)
   twgl.setBuffersAndAttributes(gl, programInfo, bufferInfo)
   twgl.setUniforms(programInfo, {
-    u_gamma: 1 / Math.sqrt(2 * Math.pow(100, settings.gamma)),
-    u_color: [settings.red, settings.green, settings.blue],
+    u_hue: settings.hue,
+    u_sat: settings.sat,
     u_image: image,
   })
   twgl.drawBufferInfo(gl, bufferInfo)
@@ -182,10 +385,8 @@ var setting = function(name) {
     needs_update = true
   })
 }
-setting('gamma')
-setting('red')
-setting('green')
-setting('blue')
+setting('hue')
+setting('sat')
 document.getElementById('save-button').addEventListener('click', function() {
   if (name !== '') {
     // Redraw canvas and use result before buffers get swapped.
